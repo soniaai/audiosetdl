@@ -79,85 +79,9 @@ def validate_audio(audio_filepath, audio_info, end_past_video_end=False):
             continue
 
         output_v = sox_info[k]
+        if output_v == 'Signed Integer PCM':
+          output_v = 'PCM_S16LE'
+
         if v != output_v:
             error_msg = 'Output audio {} should have {} = {}, but got {}.'.format(audio_filepath, k, v, output_v)
             raise FfmpegValidationError(error_msg)
-
-
-def validate_video(video_filepath, ffprobe_path, video_info, end_past_video_end=False):
-    """
-    Take video file and sanity check basic info.
-
-    Args:
-        video_filepath:  Path to output video file
-                         (Type: str)
-
-        ffprobe_path:    Path to ffprobe executable
-                         (Type: str)
-
-        video_info:      Video info dictionary
-                         (Type: str)
-    """
-    import skvideo
-    import skvideo.io
-
-    if not os.path.exists(video_filepath):
-        error_msg = 'Output file {} does not exist.'.format(video_filepath)
-        raise FfmpegValidationError(error_msg)
-
-    skvideo.setFFmpegPath(os.path.dirname(ffprobe_path))
-
-    # Check to see if we can open the file
-    try:
-        skvideo.io.vread(video_filepath)
-    except Exception as e:
-        raise FfmpegUnopenableFileError(video_filepath, e)
-
-    ffprobe_info = ffprobe(ffprobe_path, video_filepath)
-    if not ffprobe_info:
-        error_msg = 'Could not analyse {} with ffprobe'
-        raise FfmpegValidationError(error_msg.format(video_filepath))
-
-    # Get the video stream data
-    if not ffprobe_info.get('streams'):
-        error_msg = '{} has no video streams!'
-        raise FfmpegValidationError(error_msg.format(video_filepath))
-    ffprobe_info = next(stream for stream in ffprobe_info['streams'] if stream['codec_type'] == 'video')
-
-    # If duration specifically doesn't match, catch that separately so we can
-    # retry with a different duration
-    target_duration = video_info['duration']
-    try:
-        actual_fr_ratio = ffprobe_info.get('r_frame_rate',
-                                           ffprobe_info['avg_frame_rate'])
-        fr_num, fr_den = actual_fr_ratio.split('/')
-        actual_framerate = float(fr_num) / float(fr_den)
-    except KeyError:
-        error_msg = 'Could not get frame rate from {}'
-        raise FfmpegValidationError(error_msg.format(video_filepath))
-    actual_duration = float(ffprobe_info['nb_frames']) / actual_framerate
-    if target_duration != actual_duration:
-        if not(end_past_video_end and actual_duration < target_duration):
-            raise FfmpegIncorrectDurationError(video_filepath, target_duration,
-                                               actual_duration)
-
-    for k, v in video_info.items():
-        if k == 'duration' and (end_past_video_end and actual_duration < target_duration):
-            continue
-
-        output_v = ffprobe_info[k]
-
-        # Convert numeric types to float, since we may get strings from ffprobe
-        try:
-            v = float(v)
-        except ValueError:
-            pass
-        try:
-            output_v = float(output_v)
-        except ValueError:
-            pass
-
-        if v != output_v:
-            error_msg = 'Output video {} should have {} = {}, but got {}.'.format(video_filepath, k, v, output_v)
-            raise FfmpegValidationError(error_msg)
-
